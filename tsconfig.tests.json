@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": ".test-dist",
+		"rootDir": ".",
+		"module": "CommonJS",
+		"target": "ES2020",
+		"inlineSourceMap": false,
+		"inlineSources": false
+	},
+	"include": [
+		"src/**/*.ts",
+		"tests/**/*.ts"
+	]
+}
