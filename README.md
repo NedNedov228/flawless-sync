@@ -173,4 +173,4 @@ For release builds, include:
 
 ## License
 
-`0-BSD`
+`MIT`
