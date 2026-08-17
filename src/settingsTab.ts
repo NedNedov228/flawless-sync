@@ -1,4 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { CryptoUtils } from "./crypto";
 import type S3SyncPlugin from "./main";
 
 export class S3SyncSettingsTab extends PluginSettingTab {
@@ -88,6 +89,51 @@ export class S3SyncSettingsTab extends PluginSettingTab {
           .setValue(this.plugin.settings.prefix)
           .onChange(async (value) => {
             this.plugin.settings.prefix = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("E2E Encryption Passphrase")
+      .setDesc("Used to derive the encryption key. Do not lose this!")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("Enter strong passphrase")
+          .setValue(this.plugin.settings.passphrase)
+          .onChange(async (value) => {
+            this.plugin.settings.passphrase = value;
+            if (value && !this.plugin.settings.vaultSalt) {
+              this.plugin.settings.vaultSalt = await CryptoUtils.generateSalt();
+              this.display(); // Refresh UI to show the new salt
+            }
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Vault Salt")
+      .setDesc("Auto-generated. MUST be identical across all your devices to decrypt files!")
+      .addText((text) => {
+        text
+          .setPlaceholder("No salt generated yet")
+          .setValue(this.plugin.settings.vaultSalt)
+          .onChange(async (value) => {
+            this.plugin.settings.vaultSalt = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Stealth Token (X-Vault-Auth)")
+      .setDesc("Optional. Used for camouflage proxy to bypass DPI.")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("Enter stealth token")
+          .setValue(this.plugin.settings.stealthToken)
+          .onChange(async (value) => {
+            this.plugin.settings.stealthToken = value.trim();
             await this.plugin.saveSettings();
           });
       });

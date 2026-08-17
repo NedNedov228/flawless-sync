@@ -8,6 +8,9 @@ export const DEFAULT_SETTINGS: S3SyncSettings = {
   endpoint: "",
   prefix: "obsidian-vault",
   autoSyncInterval: 5,
+  passphrase: "",
+  stealthToken: "",
+  vaultSalt: "",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,6 +48,9 @@ function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
       0,
       readNumber(source, "autoSyncInterval", DEFAULT_SETTINGS.autoSyncInterval),
     ),
+    passphrase: readString(source, "passphrase", DEFAULT_SETTINGS.passphrase),
+    stealthToken: readString(source, "stealthToken", DEFAULT_SETTINGS.stealthToken).trim(),
+    vaultSalt: readString(source, "vaultSalt", DEFAULT_SETTINGS.vaultSalt).trim(),
   };
 }
 
@@ -71,6 +77,7 @@ function normalizeFileStates(raw: unknown): FileState[] {
           ? item.remoteMtime
           : 0,
       etag: typeof item.etag === "string" ? item.etag : "",
+      hmac: typeof item.hmac === "string" ? item.hmac : "",
     });
   }
 

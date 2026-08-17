@@ -7,6 +7,7 @@ void test("StateManager loads a defensive copy and serializes current state", ()
   const initialState: FileState[] = [
     {
       path: "note.md",
+      hmac: "hmac-1",
       localMtime: 1,
       remoteMtime: 2,
       etag: "etag-1",
@@ -23,6 +24,7 @@ void test("StateManager loads a defensive copy and serializes current state", ()
   assert.deepEqual(state.toJSON(), [
     {
       path: "note.md",
+      hmac: "hmac-1",
       localMtime: 1,
       remoteMtime: 2,
       etag: "etag-1",
@@ -35,12 +37,14 @@ void test("StateManager supports set, delete, and key iteration", () => {
 
   state.set("a.md", {
     path: "a.md",
+    hmac: "hmac-a",
     localMtime: 10,
     remoteMtime: 20,
     etag: "etag-a",
   });
   state.set("b.md", {
     path: "b.md",
+    hmac: "hmac-b",
     localMtime: 30,
     remoteMtime: 40,
     etag: "etag-b",

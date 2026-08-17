@@ -71,6 +71,7 @@ export default class S3SyncPlugin extends Plugin {
       this.app.vault,
       new S3Service(this.settings),
       this.state,
+      this.settings,
       async (path) => this.resolveConflict(path),
     );
   }

@@ -25,6 +25,7 @@ export interface RemoteFile {
 class ObsidianRequestUrlHandler
   implements RequestHandler<HttpRequest, HttpResponse, HttpHandlerOptions>
 {
+  constructor(private stealthToken?: string) {}
   async handle(request: HttpRequest): Promise<{ response: HttpResponse }> {
     const protocol = request.protocol ?? "https:";
     const path = request.path.startsWith("/") ? request.path : `/${request.path}`;
@@ -101,6 +102,10 @@ class ObsidianRequestUrlHandler
       normalizedHeaders[normalizedKey] = value;
     }
 
+    if (this.stealthToken) {
+      normalizedHeaders["x-vault-auth"] = this.stealthToken;
+    }
+
     return normalizedHeaders;
   }
 
@@ -123,7 +128,7 @@ class ObsidianRequestUrlHandler
 
 type S3Config = Pick<
   S3SyncSettings,
-  "bucket" | "region" | "accessKeyId" | "secretAccessKey" | "endpoint" | "prefix"
+  "bucket" | "region" | "accessKeyId" | "secretAccessKey" | "endpoint" | "prefix" | "stealthToken"
 >;
 
 export class S3Service {
@@ -140,7 +145,7 @@ export class S3Service {
       },
       endpoint: config.endpoint || undefined,
       forcePathStyle: Boolean(config.endpoint),
-      requestHandler: new ObsidianRequestUrlHandler(),
+      requestHandler: new ObsidianRequestUrlHandler(config.stealthToken),
     });
   }
 

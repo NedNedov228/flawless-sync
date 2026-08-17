@@ -28,6 +28,9 @@ void test("normalizePluginData supports legacy flat settings shape", () => {
     endpoint: "https://example.com",
     prefix: "my-prefix",
     autoSyncInterval: 0,
+    passphrase: "",
+    stealthToken: "",
+    vaultSalt: "",
   });
   assert.deepEqual(result.fileStates, []);
 });
@@ -63,12 +66,14 @@ void test("normalizePluginData filters invalid file states and keeps valid entri
       localMtime: 10,
       remoteMtime: 20,
       etag: "etag-1",
+      hmac: "",
     },
     {
       path: "broken.md",
       localMtime: 0,
       remoteMtime: 0,
       etag: "",
+      hmac: "",
     },
   ]);
 });

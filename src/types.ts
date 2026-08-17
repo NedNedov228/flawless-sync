@@ -6,10 +6,14 @@ export interface S3SyncSettings {
   endpoint: string;
   prefix: string;
   autoSyncInterval: number;
+  passphrase: string;
+  stealthToken: string;
+  vaultSalt: string;
 }
 
 export interface FileState {
   path: string;
+  hmac: string;
   localMtime: number;
   remoteMtime: number;
   etag: string;
