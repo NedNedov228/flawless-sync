@@ -31,6 +31,7 @@ void test("normalizePluginData supports legacy flat settings shape", () => {
     passphrase: "",
     stealthToken: "",
     vaultSalt: "",
+    liveSync: true,
   });
   assert.deepEqual(result.fileStates, []);
 });

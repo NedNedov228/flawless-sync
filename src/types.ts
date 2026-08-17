@@ -9,6 +9,7 @@ export interface S3SyncSettings {
   passphrase: string;
   stealthToken: string;
   vaultSalt: string;
+  liveSync: boolean;
 }
 
 export interface FileState {

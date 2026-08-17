@@ -144,8 +144,9 @@ const mockSettings = {
   prefix: "",
   autoSyncInterval: 5,
   passphrase: "test",
-  stealthToken: "",
+  stealthToken: "stealth",
   vaultSalt: "salt",
+  liveSync: true,
 };
 
 function createEngine(

@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: S3SyncSettings = {
   passphrase: "",
   stealthToken: "",
   vaultSalt: "",
+  liveSync: true,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,6 +52,7 @@ function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
     passphrase: readString(source, "passphrase", DEFAULT_SETTINGS.passphrase),
     stealthToken: readString(source, "stealthToken", DEFAULT_SETTINGS.stealthToken).trim(),
     vaultSalt: readString(source, "vaultSalt", DEFAULT_SETTINGS.vaultSalt).trim(),
+    liveSync: typeof source.liveSync === "boolean" ? source.liveSync : DEFAULT_SETTINGS.liveSync,
   };
 }
 

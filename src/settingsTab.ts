@@ -152,6 +152,20 @@ export class S3SyncSettingsTab extends PluginSettingTab {
             this.plugin.settings.autoSyncInterval =
               Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : 0;
             await this.plugin.saveSettings();
+            // saveSettings automatically calls restartAutoSync
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Live Sync (Real-time)")
+      .setDesc("Automatically sync files in real-time as you edit or delete them.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.liveSync)
+          .onChange(async (value) => {
+            this.plugin.settings.liveSync = value;
+            await this.plugin.saveSettings();
+            this.plugin.setupLiveSync();
           });
       });
 

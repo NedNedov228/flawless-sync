@@ -1,4 +1,4 @@
-import { Notice, Plugin } from "obsidian";
+import { Notice, Plugin, debounce } from "obsidian";
 import { S3Service } from "./s3Client";
 import { DEFAULT_SETTINGS, normalizePluginData } from "./settings";
 import { S3SyncSettingsTab } from "./settingsTab";
@@ -11,10 +11,19 @@ export default class S3SyncPlugin extends Plugin {
   // Sync state is stored separately from user settings, but persisted in the same plugin data blob.
   private state = new StateManager();
   private syncInterval: number | null = null;
+  private liveSyncInterval: number | null = null;
   private syncInProgress = false;
+
+  private liveSyncDebounce = debounce(() => {
+    void this.runSync(false);
+  }, 2000, true);
 
   async onload(): Promise<void> {
     await this.loadPluginState();
+
+    this.registerEvent(this.app.vault.on('modify', () => { if (this.settings.liveSync) this.liveSyncDebounce(); }));
+    this.registerEvent(this.app.vault.on('create', () => { if (this.settings.liveSync) this.liveSyncDebounce(); }));
+    this.registerEvent(this.app.vault.on('delete', () => { if (this.settings.liveSync) this.liveSyncDebounce(); }));
 
     this.addRibbonIcon("sync", "Sync with S3", async () => {
       await this.runSync(true);
@@ -28,15 +37,34 @@ export default class S3SyncPlugin extends Plugin {
 
     this.addSettingTab(new S3SyncSettingsTab(this.app, this));
     this.restartAutoSync();
+    this.setupLiveSync();
   }
 
   onunload(): void {
     this.stopAutoSync();
+    if (this.liveSyncInterval !== null) {
+      window.clearInterval(this.liveSyncInterval);
+      this.liveSyncInterval = null;
+    }
   }
 
   async saveSettings(): Promise<void> {
     await this.savePluginState();
     this.restartAutoSync();
+    this.setupLiveSync();
+  }
+
+  setupLiveSync(): void {
+    if (this.liveSyncInterval !== null) {
+      window.clearInterval(this.liveSyncInterval);
+      this.liveSyncInterval = null;
+    }
+
+    if (this.settings.liveSync) {
+      this.liveSyncInterval = window.setInterval(() => {
+        void this.runSync(false);
+      }, 3000);
+    }
   }
 
   async testConnection(): Promise<void> {

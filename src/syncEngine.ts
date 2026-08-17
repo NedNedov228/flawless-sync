@@ -66,10 +66,16 @@ export class SyncEngine {
       }
 
       if (!local) {
-        // If knownState exists but local doesn't, it means we deleted it locally. 
-        // We shouldn't redownload it unless remote is newer than when we deleted it.
-        // For simplicity (similar to original logic), if not local, we just download it.
-        // (The original logic downloaded it if !local).
+        if (knownState) {
+          const remoteChanged = remote.etag !== knownState.etag || remote.modified.getTime() > knownState.remoteMtime;
+          if (!remoteChanged) {
+            // Deleted locally, delete remotely
+            await this.s3.delete(hmac);
+            this.state.delete(knownState.path);
+            continue;
+          }
+        }
+
         const encryptedContent = await this.s3.download(hmac);
         const { path, content } = await CryptoUtils.decryptBlob(encryptedContent, keys.aesKey);
         await this.vault.createBinary(path, content);
@@ -114,8 +120,19 @@ export class SyncEngine {
       const remoteExists = remoteMap.has(hmac);
       const changedLocally = !knownState || local.stat.mtime > knownState.localMtime;
 
-      if (!changedLocally && remoteExists) {
-        continue;
+      if (!changedLocally) {
+        if (remoteExists) {
+          continue;
+        } else if (knownState) {
+          // Deleted remotely, delete locally
+          if ((this.vault as any).trash) {
+            await (this.vault as any).trash(local, false);
+          } else if ((this.vault as any).delete) {
+            await (this.vault as any).delete(local.path);
+          }
+          this.state.delete(local.path);
+          continue;
+        }
       }
 
       const content = await this.vault.readBinary(local);
