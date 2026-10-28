@@ -21,3 +21,38 @@ data.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# --- build / release artifacts ---
+dist/
+coverage/
+*.zip
+*.tgz
+*.tar.gz
+*.tsbuildinfo
+.eslintcache
+
+# --- temp / scratch files ---
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.bak
+*.orig
+*.rej
+*.patch
+*.diff
+*.local
+fix_tests.cjs
+.eslintignore
+tmp/
+temp/
+
+# --- editor / OS junk ---
+Thumbs.db
+ehthumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+

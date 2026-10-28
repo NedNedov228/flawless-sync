@@ -219,10 +219,13 @@ export class S3Service {
     );
   }
 
-  async listAll(): Promise<RemoteFile[]> {
+  async listAll(subPrefix?: string): Promise<RemoteFile[]> {
     const results: RemoteFile[] = [];
     const prefix = this.normalizePrefix();
-    const prefixedPath = prefix ? `${prefix}/` : "";
+    let prefixedPath = prefix ? `${prefix}/` : "";
+    if (subPrefix) {
+      prefixedPath += subPrefix.replace(/^\/+|\/+$/g, "") + "/";
+    }
     let token: string | undefined;
 
     do {

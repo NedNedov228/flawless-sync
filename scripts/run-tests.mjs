@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import process from "node:process";
 
 const projectRoot = process.cwd();
-const testDistDir = path.join(os.tmpdir(), "flawless-sync-tests", `${process.pid}-${Date.now()}`);
+const testDistDir = path.join(projectRoot, ".test-dist");
 const tscBin = path.join(projectRoot, "node_modules", "typescript", "bin", "tsc");
 
 function run(command, args) {
@@ -52,8 +52,15 @@ try {
 
   const compiledTestFiles = collectTestFiles(path.join(testDistDir, "tests"));
 
+  writeFileSync(
+    path.join(testDistDir, "setup.js"),
+    "const m = require('module'); const orig = m._load; m._load = function(request, parent, isMain) { if (request === 'obsidian') return { requestUrl: async () => ({ status: 200, arrayBuffer: new ArrayBuffer(0) }) }; return orig.apply(this, arguments); };"
+  );
+
   run(process.execPath, [
     "--test",
+    "--require",
+    path.join(testDistDir, "setup.js"),
     "--experimental-test-isolation=none",
     "--test-concurrency=1",
     ...compiledTestFiles,

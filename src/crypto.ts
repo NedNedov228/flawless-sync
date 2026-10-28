@@ -113,7 +113,13 @@ export class CryptoUtils {
     );
 
     const decryptedBytes = new Uint8Array(decrypted);
+    if (decryptedBytes.length < 2) {
+      throw new Error("Decrypted blob is too short to contain a path length header.");
+    }
     const pathLength = (decryptedBytes[0]! << 8) | decryptedBytes[1]!;
+    if (pathLength === 0 || 2 + pathLength > decryptedBytes.length) {
+      throw new Error(`Invalid path length ${pathLength} in decrypted blob (total size: ${decryptedBytes.length}).`);
+    }
     
     const pathBytes = decryptedBytes.slice(2, 2 + pathLength);
     const contentBytes = decryptedBytes.slice(2 + pathLength);
@@ -128,7 +134,7 @@ export class CryptoUtils {
     };
   }
 
-  private static bufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+  static bufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
     const bytes = new Uint8Array(buffer);
     let binary = "";
     for (let i = 0; i < bytes.byteLength; i++) {
@@ -137,7 +143,7 @@ export class CryptoUtils {
     return window.btoa(binary);
   }
 
-  private static base64ToBuffer(base64: string): Uint8Array {
+  static base64ToBuffer(base64: string): Uint8Array {
     const binary = window.atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {

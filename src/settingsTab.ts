@@ -170,6 +170,72 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Live Sync Polling Interval (ms)")
+      .setDesc("How often to check for remote changes (default: 1500). Lower is faster but uses more CPU/Battery.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "100";
+        text
+          .setPlaceholder("1500")
+          .setValue(String(this.plugin.settings.liveSyncPollingMs))
+          .onChange(async (value) => {
+            const parsedValue = Number.parseInt(value, 10);
+            this.plugin.settings.liveSyncPollingMs =
+              Number.isFinite(parsedValue) && parsedValue >= 100 ? parsedValue : 1500;
+            await this.plugin.saveSettings();
+            this.plugin.setupLiveSync();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Live Sync Typing Debounce (ms)")
+      .setDesc("How long to wait after you stop typing before uploading (default: 500).")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "100";
+        text
+          .setPlaceholder("500")
+          .setValue(String(this.plugin.settings.liveSyncDebounceMs))
+          .onChange(async (value) => {
+            const parsedValue = Number.parseInt(value, 10);
+            this.plugin.settings.liveSyncDebounceMs =
+              Number.isFinite(parsedValue) && parsedValue >= 100 ? parsedValue : 500;
+            await this.plugin.saveSettings();
+            this.plugin.setupLiveSyncEvents(); // We'll rename the setup for debounce
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Conflict Resolution Strategy")
+      .setDesc("How to handle conflicts when a file is edited on multiple devices at the same time.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("local-wins", "Local Wins (Overwrite remote)")
+          .addOption("remote-wins", "Remote Wins (Overwrite local)")
+          .addOption("create-copy", "Create Copy (Keep both)")
+          .setValue(this.plugin.settings.conflictResolution)
+          .onChange(async (value: "local-wins" | "remote-wins" | "create-copy") => {
+            this.plugin.settings.conflictResolution = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Settings & Plugins Conflict Strategy")
+      .setDesc("How to handle conflicts specifically for the .obsidian folder (settings and plugins).")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("local-wins", "Local Wins (Overwrite remote)")
+          .addOption("remote-wins", "Remote Wins (Overwrite local)")
+          .addOption("create-copy", "Create Copy (Keep both)")
+          .setValue(this.plugin.settings.configConflictResolution)
+          .onChange(async (value: "local-wins" | "remote-wins" | "create-copy") => {
+            this.plugin.settings.configConflictResolution = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
       .setName("Connection")
       .setDesc("Save the current settings and test whether the bucket is reachable.")
       .addButton((button) => {
@@ -185,6 +251,45 @@ export class S3SyncSettingsTab extends PluginSettingTab {
             new Notice(`S3 connection failed: ${message}`);
           }
         });
+      });
+
+    new Setting(containerEl)
+      .setName("Backup & Restore")
+      .setDesc("Create an encrypted snapshot of the entire vault on S3, or restore the latest one.")
+      .addButton((button) => {
+        button
+          .setButtonText("Create Backup")
+          .onClick(async () => {
+            button.setButtonText("Creating...");
+            try {
+              const engine = (this.plugin as any).createSyncEngine();
+              await engine.createBackup();
+              new Notice("Backup created successfully.");
+            } catch (e: any) {
+              new Notice(`Backup failed: ${e.message}`);
+            } finally {
+              button.setButtonText("Create Backup");
+            }
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Restore Latest")
+          .onClick(async () => {
+            if (confirm("Are you sure? This will overwrite your current vault with the latest backup!")) {
+              button.setButtonText("Restoring...");
+              try {
+                const engine = (this.plugin as any).createSyncEngine();
+                await engine.restoreLatestBackup();
+                new Notice("Backup restored successfully.");
+                (this.plugin as any).runSync(false);
+              } catch (e: any) {
+                new Notice(`Restore failed: ${e.message}`);
+              } finally {
+                button.setButtonText("Restore Latest");
+              }
+            }
+          });
       });
   }
 }

@@ -32,6 +32,11 @@ void test("normalizePluginData supports legacy flat settings shape", () => {
     stealthToken: "",
     vaultSalt: "",
     liveSync: true,
+    liveSyncDebounceMs: 500,
+    liveSyncPollingMs: 1500,
+    conflictResolution: "local-wins",
+    configConflictResolution: "remote-wins",
+    instanceId: "",
   });
   assert.deepEqual(result.fileStates, []);
 });

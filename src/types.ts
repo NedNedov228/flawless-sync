@@ -10,6 +10,11 @@ export interface S3SyncSettings {
   stealthToken: string;
   vaultSalt: string;
   liveSync: boolean;
+  liveSyncDebounceMs: number;
+  liveSyncPollingMs: number;
+  conflictResolution: "local-wins" | "remote-wins" | "create-copy";
+  configConflictResolution: "local-wins" | "remote-wins" | "create-copy";
+  instanceId?: string;
 }
 
 export interface FileState {

@@ -12,6 +12,11 @@ export const DEFAULT_SETTINGS: S3SyncSettings = {
   stealthToken: "",
   vaultSalt: "",
   liveSync: true,
+  liveSyncDebounceMs: 500,
+  liveSyncPollingMs: 1500,
+  conflictResolution: "local-wins",
+  configConflictResolution: "remote-wins",
+  instanceId: "",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -36,6 +41,17 @@ function readNumber(
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function readConflictResolution(
+  source: Record<string, unknown>,
+  key: keyof S3SyncSettings,
+  fallback: "local-wins" | "remote-wins" | "create-copy",
+): "local-wins" | "remote-wins" | "create-copy" {
+  const value = source[key];
+  return value === "local-wins" || value === "remote-wins" || value === "create-copy"
+    ? value
+    : fallback;
+}
+
 function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
   // Trim and clamp persisted values so broken or partial saved data does not poison the runtime config.
   return {
@@ -53,6 +69,19 @@ function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
     stealthToken: readString(source, "stealthToken", DEFAULT_SETTINGS.stealthToken).trim(),
     vaultSalt: readString(source, "vaultSalt", DEFAULT_SETTINGS.vaultSalt).trim(),
     liveSync: typeof source.liveSync === "boolean" ? source.liveSync : DEFAULT_SETTINGS.liveSync,
+    liveSyncDebounceMs: readNumber(source, "liveSyncDebounceMs", DEFAULT_SETTINGS.liveSyncDebounceMs),
+    liveSyncPollingMs: readNumber(source, "liveSyncPollingMs", DEFAULT_SETTINGS.liveSyncPollingMs),
+    conflictResolution: readConflictResolution(
+      source,
+      "conflictResolution",
+      DEFAULT_SETTINGS.conflictResolution,
+    ),
+    configConflictResolution: readConflictResolution(
+      source,
+      "configConflictResolution",
+      DEFAULT_SETTINGS.configConflictResolution,
+    ),
+    instanceId: readString(source, "instanceId", DEFAULT_SETTINGS.instanceId ?? "").trim(),
   };
 }
 
