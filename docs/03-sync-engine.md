@@ -32,15 +32,15 @@ When the engine detects that a file has diverged (both the local Vault version a
 
 ```typescript
 // From syncEngine.ts - Conflict Handling
-if (conflictStrat === "create-copy") {
-  const ext = local.path.lastIndexOf(".");
-  const base = ext !== -1 ? local.path.substring(0, ext) : local.path;
-  const extStr = ext !== -1 ? local.path.substring(ext) : "";
-  const conflictPath = `${base} (conflict ${Date.now()})${extStr}`;
-  
+if (conflictStrategy === "create-copy") {
+  const extIndex = local.path.lastIndexOf(".");
+  const base = extIndex !== -1 ? local.path.substring(0, extIndex) : local.path;
+  const ext = extIndex !== -1 ? local.path.substring(extIndex) : "";
+  const conflictPath = `${base} (conflict ${Date.now()})${ext}`;
+
   const encryptedContent = await this.s3.download(hmac);
   const { content } = await CryptoUtils.decryptBlob(encryptedContent, keys.aesKey);
-  
+
   await this.safeWriteFile(conflictPath, content); // Save the conflict copy
 }
 ```

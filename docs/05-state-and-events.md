@@ -16,12 +16,17 @@ A critical aspect of writing a long-running Obsidian plugin is cleaning up Event
 Flawless Sync implements an idempotent event registration pattern:
 ```typescript
 setupLiveSyncEvents(): void {
-  // If events are already registered, we just update the debounce timer.
-  // We avoid repeatedly un-registering and re-registering to prevent internal array growth.
+  // Vault listeners are registered exactly once. Re-registering them on every
+  // settings change would leak handlers, so only the debounce timer is rebuilt.
   if (this.eventRefs.length === 0) {
-    this.eventRefs.push(this.app.vault.on('modify', () => { if (this.settings.liveSync) this.liveSyncDebounce(); }));
-    this.eventRefs.push(this.app.vault.on('create', () => { if (this.settings.liveSync) this.liveSyncDebounce(); }));
+    const trigger = (): void => {
+      if (this.settings.liveSync) this.liveSyncDebounce?.();
+    };
+
+    this.eventRefs.push(this.app.vault.on("modify", trigger));
+    this.eventRefs.push(this.app.vault.on("create", trigger));
     // ...
+
     for (const ref of this.eventRefs) {
       this.registerEvent(ref);
     }

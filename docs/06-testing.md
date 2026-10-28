@@ -12,23 +12,20 @@ Obsidian plugins are inherently bound to the `obsidian` module, which is injecte
 To solve this, we use a custom script (`scripts/run-tests.mjs`) that intercepts the Node module loader and injects a mock `obsidian` module into the environment before tests execute.
 
 ```javascript
-// From scripts/run-tests.mjs
-const Module = require('module');
-const originalLoad = Module._load;
+// From scripts/run-tests.mjs — the real stub lives in scripts/obsidian-stub.cjs
+const m = require('module');
+const orig = m._load;
+const stub = require('<project>/scripts/obsidian-stub.cjs');
 
-Module._load = function (request, parent, isMain) {
-  if (request === 'obsidian') {
-    return {
-      requestUrl: async (options) => {
-        // Mock the HTTP response for testing the S3Client
-        return { status: 200, arrayBuffer: new ArrayBuffer(0) };
-      },
-      debounce: (cb, timeout) => cb,
-    };
-  }
-  return originalLoad.apply(this, arguments);
+m._load = function (request, parent, isMain) {
+  if (request === 'obsidian') return stub;
+  return orig.apply(this, arguments);
 };
 ```
+
+The stub exposes `TAbstractFile`, `TFile`, `TFolder` and `requestUrl`. The file classes
+matter because `SyncEngine` narrows vault entries with `instanceof TFile` instead of a
+`TFile` cast, so the mocks must be real class instances.
 
 ## 2. Test Execution
 Tests are run against the compiled `.test-dist` output directory to avoid TypeScript execution overhead during the run.

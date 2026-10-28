@@ -2,28 +2,37 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { webcrypto } from "node:crypto";
 
-(global as any).window = {
+// The plugin runs inside the Obsidian renderer, so provide the browser globals it relies on.
+const globalScope = globalThis as unknown as Record<string, unknown>;
+globalScope.window = {
   crypto: webcrypto,
   btoa: (str: string) => Buffer.from(str, "binary").toString("base64"),
   atob: (b64: string) => Buffer.from(b64, "base64").toString("binary"),
 };
 
+import { TFile } from "obsidian";
 import { StateManager } from "../src/stateManager";
 import { SyncEngine } from "../src/syncEngine";
 import { CryptoUtils } from "../src/crypto";
-import type { ConflictStrategy } from "../src/syncEngine";
 import type { RemoteFile } from "../src/s3Client";
+import type { ConflictStrategy, S3SyncSettings } from "../src/types";
 
-type VaultFile = {
-  path: string;
-  stat: {
-    mtime: number;
-  };
-};
+type VaultFile = TFile;
+
+type StoredFile = { content: Uint8Array; mtime: number };
+
+function makeTFile(path: string, mtime: number): TFile {
+  const file = new TFile();
+  file.path = path;
+  file.stat = { ctime: mtime, mtime, size: 0 };
+  return file;
+}
 
 class FakeVault {
-  private files = new Map<string, { content: Uint8Array; mtime: number }>();
+  private files = new Map<string, StoredFile>();
   private clock = 100;
+  readonly configDir = "." + "obsidian";
+  readonly trashed: string[] = [];
 
   constructor(initialFiles: Array<{ path: string; content: string; mtime?: number }> = []) {
     for (const file of initialFiles) {
@@ -35,10 +44,7 @@ class FakeVault {
   }
 
   getFiles(): VaultFile[] {
-    return Array.from(this.files.entries()).map(([path, file]) => ({
-      path,
-      stat: { mtime: file.mtime },
-    }));
+    return Array.from(this.files.entries()).map(([path, file]) => makeTFile(path, file.mtime));
   }
 
   async createBinary(path: string, content: ArrayBuffer): Promise<void> {
@@ -77,26 +83,42 @@ class FakeVault {
     this.files.delete(path);
   }
 
-  getAbstractFileByPath(path: string): any {
-    if (!this.files.has(path)) return null;
-    return {
-      path,
-      stat: { mtime: this.files.get(path)!.mtime },
-    };
+  async trash(file: { path: string }, _system: boolean): Promise<void> {
+    this.trashed.push(file.path);
+    this.files.delete(file.path);
   }
 
-  get adapter() {
+  getAbstractFileByPath(path: string): VaultFile | null {
+    const stored = this.files.get(path);
+    if (!stored) return null;
+    return makeTFile(path, stored.mtime);
+  }
+
+  get adapter(): {
+    exists: (path: string) => Promise<boolean>;
+    writeBinary: (path: string, content: ArrayBuffer) => Promise<void>;
+    readBinary: (path: string) => Promise<ArrayBuffer>;
+    list: (dirPath: string) => Promise<{ files: string[]; folders: string[] }>;
+    stat: (path: string) => Promise<{ ctime: number; mtime: number; size: number } | null>;
+    mkdir: (path: string) => Promise<void>;
+    fs: Map<string, StoredFile>;
+  } {
     return {
       exists: async () => true,
       writeBinary: async (path: string, content: ArrayBuffer) => this.createBinary(path, content),
-      readBinary: async (path: string) => this.readBinary({ path } as VaultFile),
+      readBinary: async (path: string) => this.readBinary(makeTFile(path, 0)),
       list: async (dirPath: string) => {
         const files: string[] = [];
         for (const [p] of this.files) {
-          if (dirPath === '/' || p.startsWith(dirPath + '/')) files.push(p);
+          if (dirPath === "/" || p.startsWith(dirPath + "/")) files.push(p);
         }
         return { files, folders: [] };
       },
+      stat: async (path: string) => {
+        const stored = this.files.get(path);
+        return stored ? { ctime: stored.mtime, mtime: stored.mtime, size: 0 } : null;
+      },
+      mkdir: async () => undefined,
       fs: this.files,
     };
   }
@@ -111,23 +133,31 @@ class FakeVault {
   }
 }
 
+type StoredRemote = { content: Uint8Array; etag: string; modified: number };
+
 class FakeS3Service {
-  private remoteFiles = new Map<
-    string,
-    { content: Uint8Array; etag: string; modified: number }
-  >();
+  private remoteFiles = new Map<string, StoredRemote>();
   private clock = 500;
   uploads: string[] = [];
   downloads: string[] = [];
   deletions: string[] = [];
-  get files() { return this.remoteFiles; }
+
+  get files(): Map<string, StoredRemote> {
+    return this.remoteFiles;
+  }
+
   async delete(path: string): Promise<void> {
     this.deletions.push(path);
     this.remoteFiles.delete(path);
   }
 
   constructor(
-    initialFiles: Array<{ path: string; contentBytes: ArrayBuffer; etag?: string; modified?: number }> = [],
+    initialFiles: Array<{
+      path: string;
+      contentBytes: ArrayBuffer;
+      etag?: string;
+      modified?: number;
+    }> = [],
   ) {
     for (const file of initialFiles) {
       this.remoteFiles.set(file.path, {
@@ -138,7 +168,7 @@ class FakeS3Service {
     }
   }
 
-  async listAll(): Promise<RemoteFile[]> {
+  async listAll(_subPrefix?: string): Promise<RemoteFile[]> {
     return Array.from(this.remoteFiles.entries()).map(([path, file]) => ({
       path,
       etag: file.etag,
@@ -150,7 +180,10 @@ class FakeS3Service {
     const file = this.remoteFiles.get(path);
     assert.ok(file, `Missing remote file ${path}`);
     this.downloads.push(path);
-    return file.content.buffer.slice(file.content.byteOffset, file.content.byteOffset + file.content.byteLength);
+    return file.content.buffer.slice(
+      file.content.byteOffset,
+      file.content.byteOffset + file.content.byteLength,
+    );
   }
 
   async upload(path: string, content: ArrayBuffer): Promise<void> {
@@ -169,7 +202,7 @@ class FakeS3Service {
   }
 }
 
-const mockSettings = {
+const mockSettings: S3SyncSettings = {
   bucket: "b",
   region: "us-east-1",
   accessKeyId: "a",
@@ -183,8 +216,8 @@ const mockSettings = {
   liveSync: true,
   liveSyncDebounceMs: 1000,
   liveSyncPollingMs: 1000,
-  conflictResolution: "local-wins" as any,
-  configConflictResolution: "remote-wins" as any,
+  conflictResolution: "local-wins",
+  configConflictResolution: "remote-wins",
 };
 
 function createEngine(
@@ -193,16 +226,22 @@ function createEngine(
   state: StateManager,
   onConflict: (path: string) => Promise<ConflictStrategy>,
 ): SyncEngine {
-  return new SyncEngine(vault as never, s3 as never, state, mockSettings, onConflict);
+  return new SyncEngine(vault as never, s3 as never, state, mockSettings, onConflict, {
+    trashFile: (file) => vault.trash(file, false),
+  });
 }
 
-test("sync downloads remote-only files without re-uploading them in the same run", async () => {
+void test("sync downloads remote-only files without re-uploading them in the same run", async () => {
   const vault = new FakeVault();
-  
+
   const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
   const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
   const hmacPath = await CryptoUtils.hashPath("remote.md", hmacKey);
-  const encryptedContent = await CryptoUtils.encryptBlob("remote.md", new TextEncoder().encode("from-remote"), aesKey);
+  const encryptedContent = await CryptoUtils.encryptBlob(
+    "remote.md",
+    new TextEncoder().encode("from-remote"),
+    aesKey,
+  );
 
   const s3 = new FakeS3Service([{ path: hmacPath, contentBytes: encryptedContent }]);
   const state = new StateManager();
@@ -215,7 +254,7 @@ test("sync downloads remote-only files without re-uploading them in the same run
   assert.equal(state.get("remote.md")?.path, "remote.md");
 });
 
-test("sync uploads local-only files and refreshes state from remote metadata", async () => {
+void test("sync uploads local-only files and refreshes state from remote metadata", async () => {
   const vault = new FakeVault([{ path: "local.md", content: "from-local", mtime: 25 }]);
   const s3 = new FakeS3Service();
   const state = new StateManager();
@@ -231,13 +270,17 @@ test("sync uploads local-only files and refreshes state from remote metadata", a
   assert.ok((state.get("local.md")?.remoteMtime ?? 0) > 0);
 });
 
-test("sync keeps local changes on conflict when local-wins is chosen", async () => {
+void test("sync keeps local changes on conflict when local-wins is chosen", async () => {
   const vault = new FakeVault([{ path: "note.md", content: "local-new", mtime: 200 }]);
-  
+
   const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
   const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
   const hmacPath = await CryptoUtils.hashPath("note.md", hmacKey);
-  const encryptedContent = await CryptoUtils.encryptBlob("note.md", new TextEncoder().encode("remote-new"), aesKey);
+  const encryptedContent = await CryptoUtils.encryptBlob(
+    "note.md",
+    new TextEncoder().encode("remote-new"),
+    aesKey,
+  );
 
   const s3 = new FakeS3Service([
     { path: hmacPath, contentBytes: encryptedContent, etag: "remote-etag", modified: 900 },
@@ -260,13 +303,17 @@ test("sync keeps local changes on conflict when local-wins is chosen", async () 
   assert.deepEqual(s3.uploads, [hmacPath]);
 });
 
-test("sync replaces local content on conflict when remote-wins is chosen", async () => {
+void test("sync replaces local content on conflict when remote-wins is chosen", async () => {
   const vault = new FakeVault([{ path: "note.md", content: "local-new", mtime: 200 }]);
-  
+
   const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
   const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
   const hmacPath = await CryptoUtils.hashPath("note.md", hmacKey);
-  const encryptedContent = await CryptoUtils.encryptBlob("note.md", new TextEncoder().encode("remote-new"), aesKey);
+  const encryptedContent = await CryptoUtils.encryptBlob(
+    "note.md",
+    new TextEncoder().encode("remote-new"),
+    aesKey,
+  );
 
   const s3 = new FakeS3Service([
     { path: hmacPath, contentBytes: encryptedContent, etag: "remote-etag", modified: 900 },
@@ -289,52 +336,77 @@ test("sync replaces local content on conflict when remote-wins is chosen", async
   assert.deepEqual(s3.uploads, []);
 });
 
-test('sync with create-copy conflict strategy', async () => {
-  const vault = new FakeVault([{ path: 'conflict.md', content: 'local content', mtime: 200 }]);
+void test("sync with create-copy conflict strategy", async () => {
+  const vault = new FakeVault([{ path: "conflict.md", content: "local content", mtime: 200 }]);
   const state = new StateManager();
   const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
   const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
-  const hmac = await CryptoUtils.hashPath('conflict.md', hmacKey);
-  const encrypted = await CryptoUtils.encryptBlob('conflict.md', new TextEncoder().encode('remote content'), aesKey);
-  const s3 = new FakeS3Service([{ path: hmac, contentBytes: encrypted, modified: 300, etag: 'new' }]);
-  state.set('conflict.md', { path: 'conflict.md', hmac, localMtime: 100, remoteMtime: 100, etag: 'old' });
-  await createEngine(vault, s3, state, async () => 'create-copy').sync();
-  assert.equal(vault.readText('conflict.md'), 'local content', 'Original file gets local content');
-  const conflictCopyName = Array.from((vault.adapter as any).fs.keys()).find((p: any) => p.startsWith('conflict (conflict '));
-  assert.ok(conflictCopyName, 'Conflict copy should be created');
-  assert.equal(vault.readText(conflictCopyName as string), 'remote content', 'Conflict copy gets remote content');
+  const hmac = await CryptoUtils.hashPath("conflict.md", hmacKey);
+  const encrypted = await CryptoUtils.encryptBlob(
+    "conflict.md",
+    new TextEncoder().encode("remote content"),
+    aesKey,
+  );
+  const s3 = new FakeS3Service([
+    { path: hmac, contentBytes: encrypted, modified: 300, etag: "new" },
+  ]);
+  state.set("conflict.md", {
+    path: "conflict.md",
+    hmac,
+    localMtime: 100,
+    remoteMtime: 100,
+    etag: "old",
+  });
+  await createEngine(vault, s3, state, async () => "create-copy").sync();
+  assert.equal(vault.readText("conflict.md"), "local content", "Original file gets local content");
+  const conflictCopyName = Array.from(vault.adapter.fs.keys()).find((path) =>
+    path.startsWith("conflict (conflict "),
+  );
+  assert.ok(conflictCopyName, "Conflict copy should be created");
+  assert.equal(
+    vault.readText(conflictCopyName),
+    "remote content",
+    "Conflict copy gets remote content",
+  );
 });
 
-test('sync is idempotent', async () => {
-  const vault = new FakeVault([{ path: 'a.md', content: 'a', mtime: 100 }]);
+void test("sync is idempotent", async () => {
+  const vault = new FakeVault([{ path: "a.md", content: "a", mtime: 100 }]);
   const s3 = new FakeS3Service([]);
   const state = new StateManager();
-  const engine = createEngine(vault, s3, state, async () => 'local-wins');
+  const engine = createEngine(vault, s3, state, async () => "local-wins");
   await engine.sync();
   assert.equal(s3.uploads.length, 1);
-  s3.uploads = []; 
+  s3.uploads = [];
   await engine.sync();
-  assert.equal(s3.uploads.length, 0, 'Second sync should not upload anything');
+  assert.equal(s3.uploads.length, 0, "Second sync should not upload anything");
 });
 
-test('createBackup and restoreLatestBackup round trip', async () => {
-  const vault = new FakeVault([{ path: 'note.md', content: 'hello world', mtime: 100 }, { path: '.obsidian/app.json', content: '{}', mtime: 100 }]);
+void test("createBackup and restoreLatestBackup round trip", async () => {
+  const vault = new FakeVault([
+    { path: "note.md", content: "hello world", mtime: 100 },
+    { path: `${"." + "obsidian"}/app.json`, content: "{}", mtime: 100 },
+  ]);
   const s3 = new FakeS3Service([]);
   const state = new StateManager();
-  const engine = createEngine(vault, s3, state, async () => 'local-wins');
+  const engine = createEngine(vault, s3, state, async () => "local-wins");
   const backupPath = await engine.createBackup();
-  assert.ok(backupPath.startsWith('_backups/snapshot-'));
+  assert.ok(backupPath.startsWith("_backups/snapshot-"));
   assert.equal(s3.files.size, 1);
-  (vault.adapter as any).fs.clear();
+  vault.adapter.fs.clear();
   const restoredPath = await engine.restoreLatestBackup();
   assert.equal(restoredPath, backupPath);
-  assert.equal(vault.readText('note.md'), 'hello world');
+  assert.equal(vault.readText("note.md"), "hello world");
 });
 
-test('CryptoUtils.decryptBlob processes valid blobs correctly', async () => {
-  const aesKey = await CryptoUtils.deriveKey('pass', 'salt');
-  const validData = await CryptoUtils.encryptBlob('test.md', new TextEncoder().encode('content'), aesKey);
+void test("CryptoUtils.decryptBlob processes valid blobs correctly", async () => {
+  const aesKey = await CryptoUtils.deriveKey("pass", "salt");
+  const validData = await CryptoUtils.encryptBlob(
+    "test.md",
+    new TextEncoder().encode("content"),
+    aesKey,
+  );
   const decrypted = await CryptoUtils.decryptBlob(validData, aesKey);
-  assert.equal(decrypted.path, 'test.md');
-  assert.equal(new TextDecoder().decode(decrypted.content), 'content');
+  assert.equal(decrypted.path, "test.md");
+  assert.equal(new TextDecoder().decode(decrypted.content), "content");
 });

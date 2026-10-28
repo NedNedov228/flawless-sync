@@ -12,7 +12,7 @@ graph TD
     B <-->|Encrypts/Decrypts| E(Crypto Utils)
     B <-->|Checks metadata| F[(State Manager)]
     B <-->|AWS SDK Commands| G(S3 Client)
-    G <-->|requestUrl (Bypasses CORS)| H((Amazon S3))
+    G <-->|"requestUrl (bypasses CORS)"| H((Amazon S3))
 ```
 
 ## 2. Bypassing CORS Constraints

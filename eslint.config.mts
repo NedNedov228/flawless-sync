@@ -44,6 +44,19 @@ export default tseslint.config(
 			"import/no-nodejs-modules": "off",
 		},
 	},
+	{
+		files: ["**/*.ts", "**/*.tsx"],
+		plugins: {
+			obsidianmd,
+		},
+		rules: {
+			// The rule replaces the built-in acronym list, so restate the ones this plugin uses.
+			"obsidianmd/ui/sentence-case": [
+				"error",
+				{ acronyms: ["S3", "ID", "E2E", "DPI", "CPU", "API", "URL", "JSON", "UUID", "OK"] },
+			],
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

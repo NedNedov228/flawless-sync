@@ -1,5 +1,4 @@
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -54,7 +53,15 @@ try {
 
   writeFileSync(
     path.join(testDistDir, "setup.js"),
-    "const m = require('module'); const orig = m._load; m._load = function(request, parent, isMain) { if (request === 'obsidian') return { requestUrl: async () => ({ status: 200, arrayBuffer: new ArrayBuffer(0) }) }; return orig.apply(this, arguments); };"
+    [
+      "const m = require('module');",
+      "const orig = m._load;",
+      "const stub = require(" + JSON.stringify(path.join(projectRoot, "scripts", "obsidian-stub.cjs")) + ");",
+      "m._load = function(request, parent, isMain) {",
+      "  if (request === 'obsidian') return stub;",
+      "  return orig.apply(this, arguments);",
+      "};",
+    ].join("\n"),
   );
 
   run(process.execPath, [

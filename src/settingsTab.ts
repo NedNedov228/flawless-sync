@@ -1,9 +1,66 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import { CryptoUtils } from "./crypto";
+import { getErrorMessage } from "./errors";
 import type S3SyncPlugin from "./main";
 
+class ConfirmModal extends Modal {
+  private resolved = false;
+
+  constructor(
+    app: App,
+    private message: string,
+    private onResult: (confirmed: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.createEl("p", { text: this.message });
+
+    new Setting(this.contentEl)
+      .addButton((button) => {
+        button.setButtonText("Cancel").onClick(() => {
+          this.finish(false);
+        });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Continue")
+          .setWarning()
+          .onClick(() => {
+            this.finish(true);
+          });
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    // Closing via Esc or the backdrop must not leave the caller waiting forever.
+    if (!this.resolved) {
+      this.resolved = true;
+      this.onResult(false);
+    }
+  }
+
+  private finish(confirmed: boolean): void {
+    if (this.resolved) return;
+    this.resolved = true;
+    this.onResult(confirmed);
+    this.close();
+  }
+}
+
+function confirmWithModal(app: App, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmModal(app, message, resolve).open();
+  });
+}
+
 export class S3SyncSettingsTab extends PluginSettingTab {
-  constructor(app: App, private plugin: S3SyncPlugin) {
+  constructor(
+    app: App,
+    private plugin: S3SyncPlugin,
+  ) {
     super(app, plugin);
   }
 
@@ -94,7 +151,7 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("E2E Encryption Passphrase")
+      .setName("E2E encryption passphrase")
       .setDesc("Used to derive the encryption key. Do not lose this!")
       .addText((text) => {
         text.inputEl.type = "password";
@@ -112,8 +169,8 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Vault Salt")
-      .setDesc("Auto-generated. MUST be identical across all your devices to decrypt files!")
+      .setName("Vault salt")
+      .setDesc("Auto-generated. Must be identical across all your devices to decrypt files!")
       .addText((text) => {
         text
           .setPlaceholder("No salt generated yet")
@@ -125,7 +182,7 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Stealth Token (X-Vault-Auth)")
+      .setName("Stealth token (X-Vault-Auth)")
       .setDesc("Optional. Used for camouflage proxy to bypass DPI.")
       .addText((text) => {
         text.inputEl.type = "password";
@@ -157,21 +214,21 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Live Sync (Real-time)")
+      .setName("Live sync (real-time)")
       .setDesc("Automatically sync files in real-time as you edit or delete them.")
       .addToggle((toggle) => {
-        toggle
-          .setValue(this.plugin.settings.liveSync)
-          .onChange(async (value) => {
-            this.plugin.settings.liveSync = value;
-            await this.plugin.saveSettings();
-            this.plugin.setupLiveSync();
-          });
+        toggle.setValue(this.plugin.settings.liveSync).onChange(async (value) => {
+          this.plugin.settings.liveSync = value;
+          await this.plugin.saveSettings();
+          this.plugin.setupLiveSync();
+        });
       });
 
     new Setting(containerEl)
-      .setName("Live Sync Polling Interval (ms)")
-      .setDesc("How often to check for remote changes (default: 1500). Lower is faster but uses more CPU/Battery.")
+      .setName("Live sync polling interval (ms)")
+      .setDesc(
+        "How often to check for remote changes (default: 1500). Lower is faster but uses more CPU and battery.",
+      )
       .addText((text) => {
         text.inputEl.type = "number";
         text.inputEl.min = "100";
@@ -188,7 +245,7 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Live Sync Typing Debounce (ms)")
+      .setName("Live sync typing debounce (ms)")
       .setDesc("How long to wait after you stop typing before uploading (default: 500).")
       .addText((text) => {
         text.inputEl.type = "number";
@@ -201,18 +258,18 @@ export class S3SyncSettingsTab extends PluginSettingTab {
             this.plugin.settings.liveSyncDebounceMs =
               Number.isFinite(parsedValue) && parsedValue >= 100 ? parsedValue : 500;
             await this.plugin.saveSettings();
-            this.plugin.setupLiveSyncEvents(); // We'll rename the setup for debounce
+            this.plugin.setupLiveSyncEvents(); // Rebuilds only the debounce timer
           });
       });
 
     new Setting(containerEl)
-      .setName("Conflict Resolution Strategy")
-      .setDesc("How to handle conflicts when a file is edited on multiple devices at the same time.")
+      .setName("Conflict resolution strategy")
+      .setDesc("How to handle conflicts when a file is edited on multiple devices at once.")
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("local-wins", "Local Wins (Overwrite remote)")
-          .addOption("remote-wins", "Remote Wins (Overwrite local)")
-          .addOption("create-copy", "Create Copy (Keep both)")
+          .addOption("local-wins", "Local wins (overwrite remote)")
+          .addOption("remote-wins", "Remote wins (overwrite local)")
+          .addOption("create-copy", "Create copy (keep both)")
           .setValue(this.plugin.settings.conflictResolution)
           .onChange(async (value: "local-wins" | "remote-wins" | "create-copy") => {
             this.plugin.settings.conflictResolution = value;
@@ -221,13 +278,15 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Settings & Plugins Conflict Strategy")
-      .setDesc("How to handle conflicts specifically for the .obsidian folder (settings and plugins).")
+      .setName("Settings & plugins conflict strategy")
+      .setDesc(
+        "How to handle conflicts specifically for the configuration folder (settings and plugins).",
+      )
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("local-wins", "Local Wins (Overwrite remote)")
-          .addOption("remote-wins", "Remote Wins (Overwrite local)")
-          .addOption("create-copy", "Create Copy (Keep both)")
+          .addOption("local-wins", "Local wins (overwrite remote)")
+          .addOption("remote-wins", "Remote wins (overwrite local)")
+          .addOption("create-copy", "Create copy (keep both)")
           .setValue(this.plugin.settings.configConflictResolution)
           .onChange(async (value: "local-wins" | "remote-wins" | "create-copy") => {
             this.plugin.settings.configConflictResolution = value;
@@ -246,50 +305,50 @@ export class S3SyncSettingsTab extends PluginSettingTab {
             await this.plugin.testConnection();
             new Notice("S3 connection is working.");
           } catch (error) {
-            const message =
-              error instanceof Error ? error.message : "Unknown connection error.";
-            new Notice(`S3 connection failed: ${message}`);
+            new Notice(
+              `S3 connection failed: ${getErrorMessage(error, "Unknown connection error.")}`,
+            );
           }
         });
       });
 
     new Setting(containerEl)
-      .setName("Backup & Restore")
+      .setName("Backup & restore")
       .setDesc("Create an encrypted snapshot of the entire vault on S3, or restore the latest one.")
       .addButton((button) => {
-        button
-          .setButtonText("Create Backup")
-          .onClick(async () => {
-            button.setButtonText("Creating...");
-            try {
-              const engine = (this.plugin as any).createSyncEngine();
-              await engine.createBackup();
-              new Notice("Backup created successfully.");
-            } catch (e: any) {
-              new Notice(`Backup failed: ${e.message}`);
-            } finally {
-              button.setButtonText("Create Backup");
-            }
-          });
+        button.setButtonText("Create backup").onClick(async () => {
+          button.setButtonText("Creating...");
+          try {
+            const engine = this.plugin.createSyncEngine();
+            await engine.createBackup();
+            new Notice("Backup created successfully.");
+          } catch (error) {
+            new Notice(`Backup failed: ${getErrorMessage(error, "Unknown error.")}`);
+          } finally {
+            button.setButtonText("Create backup");
+          }
+        });
       })
       .addButton((button) => {
-        button
-          .setButtonText("Restore Latest")
-          .onClick(async () => {
-            if (confirm("Are you sure? This will overwrite your current vault with the latest backup!")) {
-              button.setButtonText("Restoring...");
-              try {
-                const engine = (this.plugin as any).createSyncEngine();
-                await engine.restoreLatestBackup();
-                new Notice("Backup restored successfully.");
-                (this.plugin as any).runSync(false);
-              } catch (e: any) {
-                new Notice(`Restore failed: ${e.message}`);
-              } finally {
-                button.setButtonText("Restore Latest");
-              }
-            }
-          });
+        button.setButtonText("Restore latest").onClick(async () => {
+          const confirmed = await confirmWithModal(
+            this.app,
+            "Are you sure? This will overwrite your current vault with the latest backup!",
+          );
+          if (!confirmed) return;
+
+          button.setButtonText("Restoring...");
+          try {
+            const engine = this.plugin.createSyncEngine();
+            await engine.restoreLatestBackup();
+            new Notice("Backup restored successfully.");
+            void this.plugin.runSync(false);
+          } catch (error) {
+            new Notice(`Restore failed: ${getErrorMessage(error, "Unknown error.")}`);
+          } finally {
+            button.setButtonText("Restore latest");
+          }
+        });
       });
   }
 }

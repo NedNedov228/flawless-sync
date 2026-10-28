@@ -28,7 +28,9 @@ src/
  ├── stateManager.ts    // State tracking: Maintains local cache of ETag & modified timestamps
  ├── settings.ts        // Constants: Default settings definitions
  ├── settingsTab.ts     // UI: The Obsidian plugin settings pane
+ ├── errors.ts          // Helpers: Safe formatting of unknown thrown values
  └── types.ts           // Types: Shared TypeScript interfaces
+scripts/                // Build/test tooling, incl. the `obsidian` module stub for tests
 tests/                  // Comprehensive unit tests covering syncing behaviors and crypto
 ```
 
