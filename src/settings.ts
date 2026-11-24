@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: S3SyncSettings = {
   secretAccessKey: "",
   endpoint: "",
   prefix: "obsidian-vault",
+  excludePatterns: [],
   autoSyncInterval: 5,
   passphrase: "",
   stealthToken: "",
@@ -52,6 +53,18 @@ function readConflictResolution(
     : fallback;
 }
 
+function readStringArray(source: Record<string, unknown>, key: keyof S3SyncSettings): string[] {
+  const value = source[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
   // Trim and clamp persisted values so broken or partial saved data does not poison the runtime config.
   return {
@@ -61,6 +74,7 @@ function normalizeSettings(source: Record<string, unknown>): S3SyncSettings {
     secretAccessKey: readString(source, "secretAccessKey", DEFAULT_SETTINGS.secretAccessKey).trim(),
     endpoint: readString(source, "endpoint", DEFAULT_SETTINGS.endpoint).trim(),
     prefix: readString(source, "prefix", DEFAULT_SETTINGS.prefix).trim(),
+    excludePatterns: readStringArray(source, "excludePatterns"),
     autoSyncInterval: Math.max(
       0,
       readNumber(source, "autoSyncInterval", DEFAULT_SETTINGS.autoSyncInterval),

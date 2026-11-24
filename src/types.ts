@@ -7,6 +7,8 @@ export interface S3SyncSettings {
   secretAccessKey: string;
   endpoint: string;
   prefix: string;
+  /** Vault-relative globs excluded from sync, one per line. */
+  excludePatterns: string[];
   autoSyncInterval: number;
   passphrase: string;
   stealthToken: string;

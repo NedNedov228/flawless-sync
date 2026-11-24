@@ -209,6 +209,7 @@ const mockSettings: S3SyncSettings = {
   secretAccessKey: "s",
   endpoint: "",
   prefix: "",
+  excludePatterns: [],
   autoSyncInterval: 5,
   passphrase: "test",
   stealthToken: "stealth",
@@ -225,8 +226,9 @@ function createEngine(
   s3: FakeS3Service,
   state: StateManager,
   onConflict: (path: string) => Promise<ConflictStrategy>,
+  settings: S3SyncSettings = mockSettings,
 ): SyncEngine {
-  return new SyncEngine(vault as never, s3 as never, state, mockSettings, onConflict, {
+  return new SyncEngine(vault as never, s3 as never, state, settings, onConflict, {
     trashFile: (file) => vault.trash(file, false),
   });
 }
@@ -409,4 +411,69 @@ void test("CryptoUtils.decryptBlob processes valid blobs correctly", async () =>
   const decrypted = await CryptoUtils.decryptBlob(validData, aesKey);
   assert.equal(decrypted.path, "test.md");
   assert.equal(new TextDecoder().decode(decrypted.content), "content");
+});
+
+void test("excluded local files are never uploaded", async () => {
+  const vault = new FakeVault([
+    { path: "note.md", content: "keep me", mtime: 25 },
+    { path: "99 - Meta/Cache/setup.dmg", content: "huge", mtime: 25 },
+    { path: "99 - Meta/Cache/video.mp4", content: "huge", mtime: 25 },
+  ]);
+  const s3 = new FakeS3Service();
+  const state = new StateManager();
+  const settings: S3SyncSettings = {
+    ...mockSettings,
+    excludePatterns: ["*.dmg", "**/*.mp4"],
+  };
+
+  await createEngine(vault, s3, state, async () => "local-wins", settings).sync();
+
+  const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
+  const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
+  const uploadedPaths = s3.uploads.map((hmac) => hmac);
+  assert.ok(uploadedPaths.includes(await CryptoUtils.hashPath("note.md", hmacKey)));
+  assert.equal(uploadedPaths.includes(await CryptoUtils.hashPath("99 - Meta/Cache/setup.dmg", hmacKey)), false);
+  assert.equal(uploadedPaths.includes(await CryptoUtils.hashPath("99 - Meta/Cache/video.mp4", hmacKey)), false);
+  assert.equal(s3.uploads.length, 1);
+});
+
+void test("excluded remote files are not downloaded into the vault", async () => {
+  const vault = new FakeVault();
+  const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
+  const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
+  const hmacPath = await CryptoUtils.hashPath("99 - Meta/Cache/setup.dmg", hmacKey);
+  const encrypted = await CryptoUtils.encryptBlob(
+    "99 - Meta/Cache/setup.dmg",
+    new TextEncoder().encode("huge"),
+    aesKey,
+  );
+
+  const s3 = new FakeS3Service([{ path: hmacPath, contentBytes: encrypted }]);
+  const state = new StateManager();
+  const settings: S3SyncSettings = { ...mockSettings, excludePatterns: ["*.dmg"] };
+
+  await createEngine(vault, s3, state, async () => "local-wins", settings).sync();
+
+  // The original path only exists inside the encrypted blob, so the object has to be
+  // fetched and decrypted before it can be matched. What must not happen is a write.
+  assert.equal(vault.readText("99 - Meta/Cache/setup.dmg"), undefined);
+});
+
+void test("excluded files already tracked in state are not pulled back", async () => {
+  const vault = new FakeVault();
+  const aesKey = await CryptoUtils.deriveKey(mockSettings.passphrase, mockSettings.vaultSalt);
+  const hmacKey = await CryptoUtils.deriveHmacKey(aesKey);
+  const path = "99 - Meta/Cache/old.dmg";
+  const hmacPath = await CryptoUtils.hashPath(path, hmacKey);
+  const encrypted = await CryptoUtils.encryptBlob(path, new TextEncoder().encode("x"), aesKey);
+
+  const s3 = new FakeS3Service([{ path: hmacPath, contentBytes: encrypted }]);
+  const state = new StateManager();
+  state.set(path, { path, hmac: hmacPath, localMtime: 10, remoteMtime: 500, etag: `${hmacPath}-etag` });
+  const settings: S3SyncSettings = { ...mockSettings, excludePatterns: ["99 - Meta/Cache"] };
+
+  await createEngine(vault, s3, state, async () => "local-wins", settings).sync();
+
+  assert.equal(vault.readText(path), undefined);
+  assert.deepEqual(s3.downloads, []);
 });

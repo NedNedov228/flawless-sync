@@ -151,6 +151,27 @@ export class S3SyncSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Exclude patterns")
+      .setDesc(
+        "One glob per line. Matching files and folders are skipped in both directions. " +
+          "Examples: *.dmg, **/*.mp4, 99 - Meta/Cache",
+      )
+      .addTextArea((text) => {
+        text
+          .setPlaceholder("*.dmg\n**/*.mp4\n99 - Meta/Cache")
+          .setValue(this.plugin.settings.excludePatterns.join("\n"))
+          .onChange(async (value) => {
+            this.plugin.settings.excludePatterns = value
+              .split("\n")
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 5;
+        text.inputEl.addClass("flawless-sync-exclude-input");
+      });
+
+    new Setting(containerEl)
       .setName("E2E encryption passphrase")
       .setDesc("Used to derive the encryption key. Do not lose this!")
       .addText((text) => {

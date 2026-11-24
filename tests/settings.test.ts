@@ -27,6 +27,7 @@ void test("normalizePluginData supports legacy flat settings shape", () => {
     secretAccessKey: "secret",
     endpoint: "https://example.com",
     prefix: "my-prefix",
+    excludePatterns: [],
     autoSyncInterval: 0,
     passphrase: "",
     stealthToken: "",

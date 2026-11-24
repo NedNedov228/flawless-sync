@@ -3,6 +3,8 @@ import type { TAbstractFile, Vault } from "obsidian";
 import { S3Service } from "./s3Client";
 import { StateManager } from "./stateManager";
 import { CryptoUtils } from "./crypto";
+import { compileExcludes } from "./exclude";
+import type { ExcludeMatcher } from "./exclude";
 import type {
   ConflictStrategy,
   DerivedKeys,
@@ -121,8 +123,11 @@ export class SyncEngine {
 
   private async getAllLocalFiles(options: LocalFileOptions): Promise<LocalFileEntry[]> {
     const files: LocalFileEntry[] = [];
+    const isExcluded = this.getExcludeMatcher();
+    const keep = (path: string): boolean => !isExcluded(path);
+
     if (options.syncNotes) {
-      files.push(...this.vault.getFiles());
+      files.push(...this.vault.getFiles().filter((file) => keep(file.path)));
     }
 
     if (!options.syncConfig) {
@@ -143,6 +148,9 @@ export class SyncEngine {
       const walk = async (path: string): Promise<void> => {
         const list = await adapter.list(path);
         for (const filePath of list.files) {
+          if (!keep(filePath)) {
+            continue;
+          }
           const stat = await adapter.stat(filePath);
           files.push({
             path: filePath.replace(/\\/g, "/"),
@@ -150,6 +158,9 @@ export class SyncEngine {
           });
         }
         for (const folderPath of list.folders) {
+          if (!keep(folderPath)) {
+            continue;
+          }
           await walk(folderPath);
         }
       };
@@ -160,6 +171,11 @@ export class SyncEngine {
     }
 
     return files;
+  }
+
+  /** Excludes are recompiled per sync run so settings edits take effect without a reload. */
+  private getExcludeMatcher(): ExcludeMatcher {
+    return compileExcludes(this.settings.excludePatterns ?? []);
   }
 
   private async readLocalFile(path: string): Promise<ArrayBuffer> {
@@ -206,6 +222,7 @@ export class SyncEngine {
       localHmacMap.set(hmac, file);
     }
 
+    const isExcludedPath = this.getExcludeMatcher();
     const remoteMap = new Map(remoteFiles.map((file) => [file.path, file]));
 
     for (const [hmac, remote] of remoteMap) {
@@ -227,6 +244,12 @@ export class SyncEngine {
 
         // If we don't know the path locally and it's not in state, it's a new remote file.
         if (!local) {
+          // An excluded file that already exists remotely must not be pulled back into the vault,
+          // otherwise every sync re-creates the large files the user just told us to skip.
+          if (knownState && isExcludedPath(knownState.path)) {
+            continue;
+          }
+
           if (knownState) {
             const remoteChanged =
               remote.etag !== knownState.etag || remote.modified.getTime() > knownState.remoteMtime;
@@ -239,6 +262,10 @@ export class SyncEngine {
 
           const encryptedContent = await this.s3.download(hmac);
           const { path, content } = await CryptoUtils.decryptBlob(encryptedContent, keys.aesKey);
+
+          if (isExcludedPath(path)) {
+            continue;
+          }
 
           await this.ensureFolderExists(path);
           await this.safeWriteFile(path, content);
